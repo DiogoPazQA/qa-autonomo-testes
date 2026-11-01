@@ -1,0 +1,64 @@
+name: QA Autonomo - Exploracao
+run-name: "Exploracao ${{ inputs.map_id }}"
+on:
+  workflow_dispatch:
+    inputs:
+      map_id: { required: true, type: string }
+      base_url: { required: true, type: string }
+jobs:
+  explorar:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/setup-node@v4
+        with: { node-version: 20 }
+      - name: Instalar Playwright
+        run: |
+          npm init -y >/dev/null
+          npm i playwright@1.49 >/dev/null
+          npx playwright install --with-deps chromium
+      - name: Explorar telas
+        env:
+          BASE_URL: ${{ inputs.base_url }}
+        run: |
+          cat > explore.mjs <<'JS'
+          import { chromium } from 'playwright';
+          import fs from 'fs';
+          const base = process.env.BASE_URL.replace(/\/$/, '');
+          const origin = new URL(base).origin;
+          const out = [];
+          const browser = await chromium.launch();
+          const page = await browser.newPage({ viewport: { width: 1280, height: 900 } });
+          const snap = async () => (await page.locator('body').ariaSnapshot().catch(() => '')).slice(0, 6000);
+          const open = async (u) => { await page.goto(u, { waitUntil: 'networkidle', timeout: 30000 }).catch(() => {}); await page.waitForTimeout(800); };
+          const visit = async (u) => {
+            await open(u);
+            const path = new URL(page.url()).pathname;
+            out.push(`## Tela ${path}\n${await snap()}`);
+            const buttons = (await page.getByRole('button').all()).slice(0, 10);
+            const names = [];
+            for (const b of buttons) { const n = ((await b.innerText().catch(() => '')) || (await b.getAttribute('aria-label')) || '').trim(); if (n && (await b.isVisible())) names.push(n); }
+            for (const n of [...new Set(names)]) {
+              await open(u);
+              const before = page.url();
+              await page.getByRole('button', { name: n, exact: true }).first().click({ timeout: 3000 }).catch(() => {});
+              await page.waitForTimeout(1200);
+              const moved = page.url() !== before ? ` (foi para ${new URL(page.url()).pathname})` : '';
+              out.push(`### Em ${path}, depois de clicar no botão "${n}"${moved}\n${await snap()}`);
+            }
+            const links = await page.$$eval('a[href]', (as) => as.map((a) => a.href));
+            return links.filter((h) => h.startsWith(origin)).map((h) => h.split('#')[0]);
+          };
+          const queue = [base]; const seen = new Set();
+          while (queue.length && seen.size < 8) {
+            const u = queue.shift(); if (seen.has(u)) continue; seen.add(u);
+            for (const l of await visit(u)) if (!seen.has(l)) queue.push(l);
+          }
+          await browser.close();
+          fs.writeFileSync('site-map.md', out.join('\n\n').slice(0, 80000));
+          JS
+          node explore.mjs
+      - uses: actions/upload-artifact@v4
+        with:
+          name: mapa-${{ inputs.map_id }}
+          path: site-map.md
