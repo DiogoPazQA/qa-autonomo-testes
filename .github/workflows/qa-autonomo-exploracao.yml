@@ -1,0 +1,42 @@
+name: QA Autonomo - Exploracao
+run-name: "Exploracao ${{ inputs.map_id }}"
+on:
+  workflow_dispatch:
+    inputs:
+      map_id: { required: true, type: string }
+      base_url: { required: true, type: string }
+      allowed_hosts:
+        description: "Domínios autorizados, separados por vírgula (padrão: o domínio do base_url)"
+        required: false
+        type: string
+permissions:
+  contents: read
+jobs:
+  explorar:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 20 }
+      - name: Instalar Playwright
+        run: |
+          npm init -y >/dev/null
+          npm i playwright@1.49.1 >/dev/null
+          npx playwright install --with-deps chromium
+      - name: Explorar telas (somente leitura)
+        env:
+          BASE_URL: ${{ inputs.base_url }}
+          ALLOWED_HOSTS: ${{ inputs.allowed_hosts }}
+        run: |
+          if [ -z "$ALLOWED_HOSTS" ]; then ALLOWED_HOSTS=$(node -e "console.log(new URL(process.env.BASE_URL).hostname)"); fi
+          export ALLOWED_HOSTS
+          node scripts/explore.mjs
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: mapa-${{ inputs.map_id }}
+          path: |
+            site-map.md
+            evidencias/
+          if-no-files-found: warn
