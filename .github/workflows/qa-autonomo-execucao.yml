@@ -61,3 +61,13 @@ jobs:
             results.json
             playwright-report/
             test-results/
+  avisar:
+    needs: e2e
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Avisar o QA Autonomo
+        run: |
+          curl -sS -X POST "https://qa-autonomo.lovable.app/api/public/github-run-finished" \
+            -H "Content-Type: application/json" \
+            -d '{"run_id":"${{ inputs.run_id }}","github_run_id":${{ github.run_id }}}' || true
